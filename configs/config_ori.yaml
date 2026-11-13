@@ -1,0 +1,155 @@
+project:
+  name: dasigt
+  seed: 7
+  # datasets: [UCEC]
+  datasets: [BLCA, BRCA, UCEC, GBMLGG, LUAD]
+  output_root: /data_1_16T/data_yagao/data_gitms/outputs_PR/outputs_PR_ori
+  real_use_data_root: /data_1_16T/data_yagao/data_gitms/real_use_data_PR/real_use_data_PR_ori
+  summary_data_process: summary_table_ori/data_process
+  summary_analysis: summary_table_ori_test/analysis_1
+  device: cuda:1
+  num_workers: 0
+
+paths:
+  raw_root: /data_1_16T/data_yagao/data_gitms/
+  image_dir: all_conch_image_dirs/
+  text_dir: all_conch_sent_dirs/
+  gene_expression_dir: mRNA/
+  gene2vec_file: gene2vec.txt
+  clinical_dir: clinical_info/
+  split_root: /home/yagao/workspace/Gitms/DASIGT_Project/splits/5foldcv/
+  split_pattern: "tcga_{dataset_lower}/splits_{fold}.csv"
+  # Optional two-column CSV: expression_gene_id,gene_symbol. Leave empty when IDs already match Gene2Vec.
+  gene_id_map_file: ""
+  # Optional file/directory name under raw_root for expression matrices; each cohort expects DATASET.csv.
+
+features:
+  image_dim: 512
+  text_dim: 512
+  gene2vec_dim: 200
+  feature_pooling: mean
+  max_image_tokens: 2048
+  max_text_tokens: 512
+  gene_id_separator: "|"
+  gene_selection: variance
+  top_gene_num: 5000
+  gene_cluster_num: 50
+  gene_temperature: 0.5
+  gene_center_init: kmeans
+  gene_kmeans_n_init: 10
+  gene_kmeans_max_iter: 300
+  gene_kmeans_random_state: 7
+  gene_power_steps: 8
+  gene_epsilon: 1.0e-8
+  gene_center_svd: true
+
+survival:
+  time_bins: 4
+  time_unit: days
+  clinical_id_col: ""
+  event_col: vital_status
+  event_positive_values: [1, "1", dead, Dead, DEAD, deceased, Deceased]
+  time_col: ""
+  death_time_col: days_to_death
+  censor_time_col: days_to_last_followup
+  # If vital_status cannot be parsed, event is inferred from non-empty days_to_death.
+  fit_cutpoints_on_train_events_only: true
+
+model:
+  name: dasigt
+  hidden_dim: 512
+  attention_heads: 8
+  attention_dropout: 0.1
+  dropout: 0.25
+  num_experts: 4
+  routing_temperature: 1.0
+  routing_gumbel: true
+  routing_straight_through: true
+  routing_eval: argmax
+  lambda_gene: 10.0
+  ablation: none
+  # none, no_gene_loss, no_gene_prior, fixed_trifusion, no_modality_gate, no_expert_gate,
+  # expert1_only, expert2_only, expert3_only, expert4_only, no_report, no_gene, no_image
+
+training:
+  folds: [0, 1, 2, 3, 4]
+  max_epochs: 50
+  early_stopping: false
+  patience: 10
+  batch_size: 4
+  gradient_accumulation_steps: 1
+  optimizer: adamw
+  learning_rate: 0.0002
+  weight_decay: 0.00001
+  grad_clip_norm: 5.0
+  use_amp: false
+  monitor: val_cindex
+  save_predictions: true
+  allow_val_test_overlap: true
+  debug_gradient_tracking: false
+  debug_gradient_path_check: false
+  debug_gradient_every_n_steps: 1
+  pin_memory: true
+
+ablation:
+  variants:
+    - none
+    - no_gene_loss
+    - no_gene_prior
+    - fixed_trifusion
+    - no_modality_gate
+    - no_expert_gate
+    - expert1_only
+    - expert2_only
+    - expert3_only
+    - expert4_only
+    - no_gene
+    - no_report
+
+# Merge this block into the existing config's `analysis:` section.
+analysis:
+  # Select exactly one backend: toppgene or kegg.
+  enrichment_tool: kegg
+  enrichment_background: all_category_genes
+  # -1 means all genes hard-assigned to each module by row-wise argmax.
+  pathway_top_genes: -1
+  toppfun:
+    enabled: false
+    execution_mode: disabled
+    endpoint: https://toppgene.cchmc.org/API
+    categories:
+      - GeneOntologyBiologicalProcess
+      - GeneOntologyMolecularFunction
+      - GeneOntologyCellularComponent
+      - Pathway
+    correction: Bonferroni
+    pvalue: 0.05
+    significance_qvalue: 0.05
+    min_genes: 2
+    max_genes: 1500
+    max_results: 100
+    top_genes_per_module: 50
+    max_modules_per_fold: 0
+    variants: [none]
+    background: all_category_genes
+    lookup_batch_size: 250
+    request_interval_seconds: 0.4
+    timeout_seconds: 30
+    retries: 2
+    use_cache: true
+    organism: hsa
+  kegg:
+    endpoint: https://rest.kegg.jp
+    organism: hsa
+    request_interval_seconds: 0.4
+    timeout_seconds: 600
+    retries: 2
+    use_cache: true
+    # analysis.pathway_top_genes is the shared selection control and takes precedence.
+    top_genes_per_module: 50
+    max_modules_per_fold: 0
+    variants: [none]
+    background: all_category_genes
+    min_genes: 2
+    max_results: 100
+    significance_qvalue: 0.05
